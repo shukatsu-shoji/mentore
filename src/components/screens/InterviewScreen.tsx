@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Mic, MicOff, Send, Square, Clock, MessageSquare, Wifi, WifiOff } from 'lucide-react';
+import { ArrowLeft, Send, Square, Clock, MessageSquare, Wifi, WifiOff } from 'lucide-react';
 import { InterviewSettings, InterviewQuestion, InterviewMetrics } from '../../types/interview';
 import { generateQuestion } from '../../services/geminiAPI';
 import { useSpeechRecognition } from '../../hooks/useSpeechRecognition';
 import { useNotification } from '../NotificationSystem';
 import { LoadingSpinner } from '../LoadingSpinner';
+import { VoiceInputButton } from '../VoiceInputButton';
+import { VoiceErrorDisplay } from '../VoiceErrorDisplay';
 import { usePerformanceTracking } from '../PerformanceMonitor';
 import { useUsageTracking } from '../../hooks/useUsageTracking';
 
@@ -28,6 +30,7 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({
   const [questionStartTime, setQuestionStartTime] = useState<number>(Date.now());
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [firstQuestionShown, setFirstQuestionShown] = useState(false);
+  const [showVoiceHelp, setShowVoiceHelp] = useState(false);
   const [interviewMetrics, setInterviewMetrics] = useState<InterviewMetrics>({
     totalResponseTime: 0,
     averageResponseLength: 0,
@@ -48,7 +51,10 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({
     clearTranscript,
     isSupported,
     confidence,
-    error: speechError
+    error: speechError,
+    permissionStatus,
+    isRequestingPermission,
+    requestPermission
   } = useSpeechRecognition();
 
   // 利用回数記録（1問目が表示された時）- 面接設定情報も含めて記録
@@ -88,18 +94,6 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({
       window.removeEventListener('offline', handleOffline);
     };
   }, [showNotification]);
-
-  // 音声認識エラーの通知
-  useEffect(() => {
-    if (speechError) {
-      showNotification({
-        type: 'error',
-        title: '音声認識エラー',
-        message: speechError,
-        duration: 5000
-      });
-    }
-  }, [speechError, showNotification]);
 
   // Initialize first question
   useEffect(() => {
@@ -370,34 +364,13 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({
     }
   };
 
-  // 音声入力ボタンのハンドラー - 改善版
-  const handleVoiceInput = () => {
-    if (!isSupported) {
-      showNotification({
-        type: 'warning',
-        title: '音声入力がサポートされていません',
-        message: 'Chrome、Edge、Safariなどの対応ブラウザをお使いください。',
-        duration: 5000
-      });
-      return;
-    }
-
+  const handleVoiceRetry = () => {
     if (isListening) {
       stopListening();
-      showNotification({
-        type: 'info',
-        title: '音声入力を停止しました',
-        duration: 2000
-      });
-    } else {
-      startListening();
-      showNotification({
-        type: 'info',
-        title: '音声入力を開始しました',
-        message: 'マイクに向かって話してください。',
-        duration: 3000
-      });
     }
+    setTimeout(() => {
+      startListening();
+    }, 500);
   };
 
   const currentQuestion = questions[questions.length - 1];
@@ -533,20 +506,17 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({
               {/* Enhanced Voice Input & Submit */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-3">
-                  {isSupported && (
-                    <button
-                      onClick={handleVoiceInput}
-                      className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-all ${
-                        isListening
-                          ? 'bg-red-100 text-red-700 hover:bg-red-200 shadow-sm'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }`}
-                      disabled={isSubmittingAnswer}
-                    >
-                      {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                      <span>{isListening ? '録音停止' : '音声入力'}</span>
-                    </button>
-                  )}
+                  <VoiceInputButton
+                    isListening={isListening}
+                    isSupported={isSupported}
+                    permissionStatus={permissionStatus}
+                    isRequestingPermission={isRequestingPermission}
+                    error={speechError}
+                    confidence={confidence}
+                    onStartListening={startListening}
+                    onRequestPermission={requestPermission}
+                    disabled={isSubmittingAnswer}
+                  />
                   
                   {isListening && (
                     <div className="flex items-center space-x-2 text-red-600">
@@ -557,12 +527,6 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({
                           信頼度: {Math.round(confidence * 100)}%
                         </span>
                       )}
-                    </div>
-                  )}
-
-                  {!isSupported && (
-                    <div className="text-sm text-gray-500">
-                      音声入力は対応ブラウザでのみ利用可能です
                     </div>
                   )}
                 </div>
@@ -585,6 +549,13 @@ export const InterviewScreen: React.FC<InterviewScreenProps> = ({
                   )}
                 </button>
               </div>
+
+              {/* Voice Error Display */}
+              <VoiceErrorDisplay
+                error={speechError}
+                onRetry={handleVoiceRetry}
+                onShowHelp={() => setShowVoiceHelp(true)}
+              />
             </div>
           )}
         </div>
